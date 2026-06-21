@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     scheduler_enabled: bool = False
     pipeline_interval_minutes: int = 180
     youtube_max_results_per_keyword: int = 20
-    analysis_batch_size: int = 50
+    analysis_batch_size: int = 200
     embedding_batch_size: int = 100
     clustering_limit: int | None = None
 

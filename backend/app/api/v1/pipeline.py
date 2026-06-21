@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.services.analysis_service import AnalysisService
+from app.services.analysis_job_manager import AnalysisJobManager
 from app.services.clustering_service import ClusteringService
 from app.services.embedding_pipeline import EmbeddingPipeline
 from app.services.google_news_ingestion import GoogleNewsIngestionService
@@ -51,29 +52,20 @@ async def ingest_data(db: Session = Depends(get_db)) -> Dict:
 
 
 @router.post("/analyze")
-async def analyze_data(db: Session = Depends(get_db)) -> Dict:
-    logger.info("Starting analysis pipeline")
-    status = {
-        "analysis": "running",
-        "success": False
-    }
+async def start_analysis_job() -> Dict:
+    logger.info("Starting analysis background job")
+    job_manager = AnalysisJobManager()
+    success = job_manager.start_analysis()
+    if success:
+        return job_manager.get_status()
+    else:
+        return {"error": "Analysis is already running", **job_manager.get_status()}
 
-    try:
-        analysis_service = AnalysisService(db)
-        result = analysis_service.process_unanalysed_posts()
-        status["analysis"] = "success"
-        status["found"] = result["found"]
-        status["processed"] = result["processed"]
-        status["failed"] = result["failed"]
-        status["success"] = True
-        logger.info("Analysis complete: found=%s processed=%s failed=%s", result["found"], result["processed"], result["failed"])
-        return status
-    except Exception as e:
-        logger.exception("Analysis pipeline failed")
-        status["analysis"] = "failed"
-        status["success"] = False
-        status["error"] = str(e)
-        return status
+
+@router.get("/analyze/status")
+async def get_analysis_status() -> Dict:
+    job_manager = AnalysisJobManager()
+    return job_manager.get_status()
 
 
 @router.post("/embed")

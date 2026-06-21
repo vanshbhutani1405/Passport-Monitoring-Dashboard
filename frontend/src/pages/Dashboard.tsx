@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 
 import { api, type PipelineStatus } from "../api/client";
 import type { Analytics, HealthStatus, Post } from "../api/types";
@@ -17,11 +17,13 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pipelineStatus, setPipelineStatus] = useState<PipelineStatus | null>(null);
+  const [analysisStatus, setAnalysisStatus] = useState<PipelineStatus | null>(null);
   const [isIngesting, setIsIngesting] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isEmbedding, setIsEmbedding] = useState(false);
   const [isClustering, setIsClustering] = useState(false);
   const [isRunningAll, setIsRunningAll] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const intervalRef = useRef<number | null>(null);
 
   const loadDashboard = async () => {
     try {
@@ -29,7 +31,7 @@ export default function Dashboard() {
       const [analyticsData, healthData, postsData] = await Promise.all([
         api.getAnalytics(),
         api.getHealth(),
-        api.getPosts({ page: 1, page_size: 8 }),
+        api.getPosts({ page: 1, page_size: 50 }),
       ]);
       setAnalytics(analyticsData);
       setHealth(healthData);
@@ -42,9 +44,38 @@ export default function Dashboard() {
     }
   };
 
+  const loadAnalysisStatus = async () => {
+    try {
+      const status = await api.getAnalysisStatus();
+      setAnalysisStatus(status);
+    } catch {
+      // ignore errors when not important
+    }
+  }
+
   useEffect(() => {
     void loadDashboard();
+    void loadAnalysisStatus();
   }, []);
+
+  useEffect(() => {
+    if (analysisStatus?.status === "running") {
+      intervalRef.current = setInterval(() => {
+        void loadAnalysisStatus();
+      }, 2000);
+    } else {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+      void loadDashboard();
+    }
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [analysisStatus?.status]);
 
   const handleIngest = async () => {
     setIsIngesting(true);
@@ -65,20 +96,12 @@ export default function Dashboard() {
   };
 
   const handleAnalyze = async () => {
-    setIsAnalyzing(true);
     try {
       const result = await api.runAnalyze();
-      setPipelineStatus(result);
-      if (result.success) {
-        showToast("Analysis completed successfully!", "success");
-      } else {
-        showToast(`Analysis failed: ${result.error}`, "error");
-      }
-      await loadDashboard();
+      setAnalysisStatus(result);
+      showToast("Analysis job started!", "success");
     } catch (e) {
       showToast("Failed to start analysis", "error");
-    } finally {
-      setIsAnalyzing(false);
     }
   };
 
@@ -136,14 +159,33 @@ export default function Dashboard() {
     }
   };
 
+  const handleExport = async () => {
+    setIsExporting(true);
+    try {
+      const blob = await api.exportCSV();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "passport_posts.csv";
+      a.click();
+      window.URL.revokeObjectURL(url);
+      showToast("CSV exported successfully!", "success");
+    } catch (e) {
+      showToast("Failed to export CSV", "error");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   if (loading) return <LoadingState label="Loading dashboard" />;
   if (error || !analytics) return <ErrorState message={error ?? "Dashboard data unavailable."} />;
 
   const databaseOk = health?.database_status === "ok";
-  const anyLoading = isIngesting || isAnalyzing || isEmbedding || isClustering || isRunningAll;
+  const isAnalysisRunning = analysisStatus?.status === "running";
+  const anyLoading = isIngesting || isAnalysisRunning || isEmbedding || isClustering || isRunningAll || isExporting;
 
   const getStatusBadge = (status: string) => {
-    if (status === "success") {
+    if (status === "success" || status === "completed") {
       return <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-medium text-emerald-800">Success</span>;
     }
     if (status === "failed") {
@@ -152,11 +194,17 @@ export default function Dashboard() {
     if (status === "running") {
       return <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-800">Running</span>;
     }
-    if (status === "pending") {
+    if (status === "pending" || status === "idle") {
       return <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">Pending</span>;
     }
     return null;
   };
+
+  const progressPercent =
+    typeof analysisStatus?.total_posts === 'number' &&
+    typeof analysisStatus?.processed === 'number'
+      ? Math.round((analysisStatus.processed / analysisStatus.total_posts) * 100)
+      : 0;
 
   return (
     <div className="space-y-6">
@@ -175,6 +223,7 @@ export default function Dashboard() {
           </div>
           <div className="flex flex-wrap gap-3">
             <button
+              title="Reload dashboard data"
               onClick={handleIngest}
               disabled={anyLoading}
               className={`rounded-md px-4 py-2 text-sm font-medium transition ${
@@ -186,17 +235,19 @@ export default function Dashboard() {
               {isIngesting ? "Ingesting..." : "Refresh Data"}
             </button>
             <button
+              title="Generate AI summaries, categories, sentiment, language and spam detection"
               onClick={handleAnalyze}
               disabled={anyLoading}
               className={`rounded-md px-4 py-2 text-sm font-medium transition ${
-                isAnalyzing
+                isAnalysisRunning
                   ? "bg-slate-300 cursor-not-allowed text-slate-600"
                   : "bg-indigo-600 text-white hover:bg-indigo-700"
               }`}
             >
-              {isAnalyzing ? "Analyzing..." : "Run Analysis"}
+              {isAnalysisRunning ? "Analyzing..." : "Run Analysis"}
             </button>
             <button
+              title="Create semantic vectors for similarity search and clustering"
               onClick={handleEmbed}
               disabled={anyLoading}
               className={`rounded-md px-4 py-2 text-sm font-medium transition ${
@@ -208,6 +259,7 @@ export default function Dashboard() {
               {isEmbedding ? "Generating..." : "Generate Embeddings"}
             </button>
             <button
+              title="Group similar discussions together"
               onClick={handleCluster}
               disabled={anyLoading}
               className={`rounded-md px-4 py-2 text-sm font-medium transition ${
@@ -219,6 +271,7 @@ export default function Dashboard() {
               {isClustering ? "Clustering..." : "Rebuild Clusters"}
             </button>
             <button
+              title="Ingest new data, analyze posts, generate embeddings and rebuild clusters"
               onClick={handleRunAll}
               disabled={anyLoading}
               className={`rounded-md px-4 py-2 text-sm font-medium transition ${
@@ -229,7 +282,47 @@ export default function Dashboard() {
             >
               {isRunningAll ? "Running Full Pipeline..." : "Run Full Pipeline"}
             </button>
+            <button
+              onClick={handleExport}
+              disabled={anyLoading}
+              className={`rounded-md px-4 py-2 text-sm font-medium transition ${
+                isExporting
+                  ? "bg-slate-300 cursor-not-allowed text-slate-600"
+                  : "bg-slate-600 text-white hover:bg-slate-700"
+              }`}
+            >
+              {isExporting ? "Exporting..." : "Export CSV"}
+            </button>
           </div>
+
+          {/* Analysis Status Section */}
+          {analysisStatus && (
+            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <h4 className="mb-3 text-sm font-semibold text-slate-900">AI Analysis Status</h4>
+              <div className="mb-4">
+                <div className="flex items-center justify-between text-sm text-slate-600 mb-2">
+                  <span>Pending: {analysisStatus.total_pending ?? 0}</span>
+                  <span>Processed: {analysisStatus.processed ?? 0}</span>
+                  <span>Remaining: {analysisStatus.remaining ?? 0}</span>
+                  <span>Success: {analysisStatus.successful ?? 0}</span>
+                  <span>Failed: {analysisStatus.failed ?? 0}</span>
+                </div>
+                <div className="w-full bg-slate-200 rounded-full h-3">
+                  <div
+                    className="bg-indigo-600 h-3 rounded-full transition-all duration-300"
+                    style={{ width: `${progressPercent}%` }}
+                  ></div>
+                </div>
+                <p className="text-sm text-slate-600 mt-2">
+                  {analysisStatus.status === "running" ? (
+                    "Analyzing posts..."
+                  ) : analysisStatus.status === "completed" ? (
+                    "Analysis complete!"
+                  ) : null}
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Pipeline Status */}
           {pipelineStatus && (
@@ -279,8 +372,14 @@ export default function Dashboard() {
               {pipelineStatus.found !== undefined && (
                 <p className="mt-2 text-sm text-slate-600">Found {pipelineStatus.found} items to process</p>
               )}
+              {pipelineStatus.total_pending !== undefined && (
+                <p className="text-sm text-slate-600">Total pending analysis: {pipelineStatus.total_pending}</p>
+              )}
               {pipelineStatus.processed !== undefined && (
                 <p className="text-sm text-slate-600">Processed {pipelineStatus.processed} items</p>
+              )}
+              {pipelineStatus.remaining !== undefined && (
+                <p className="text-sm text-slate-600">Remaining: {pipelineStatus.remaining}</p>
               )}
               {pipelineStatus.cluster_count !== undefined && (
                 <p className="text-sm text-slate-600">Created {pipelineStatus.cluster_count} clusters</p>

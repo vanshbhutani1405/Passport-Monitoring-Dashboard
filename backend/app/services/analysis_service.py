@@ -1,13 +1,14 @@
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.models.analysis import Analysis
 from app.models.post import Post
 from app.nlp.groq_analyzer import GroqAnalyzer
+from app.core.config import get_settings
 
 
 logger = logging.getLogger(__name__)
@@ -17,19 +18,33 @@ class AnalysisService:
     def __init__(self, db: Session, analyzer: GroqAnalyzer | None = None) -> None:
         self.db = db
         self.analyzer = analyzer or GroqAnalyzer()
+        self.settings = get_settings()
 
-    def process_unanalysed_posts(self, limit: int = 50) -> dict[str, int]:
+    def process_unanalysed_posts(self, limit: int | None = None) -> dict[str, any]:
+        if limit is None:
+            limit = self.settings.analysis_batch_size
+            
+        total_pending = self.db.scalar(
+            select(func.count())
+            .select_from(Post)
+            .outerjoin(Analysis, Analysis.post_id == Post.id)
+            .where(Analysis.id.is_(None))
+        ) or 0
+        
         posts = self._fetch_unanalysed_posts(limit=limit)
         stats = {
+            "total_pending": total_pending,
             "found": len(posts),
             "processed": 0,
             "failed": 0,
+            "success": True,
         }
 
-        logger.info("Starting Groq analysis batch: found=%s limit=%s", len(posts), limit)
+        logger.info("Starting Groq analysis batch: found=%s limit=%s total_pending=%s", len(posts), limit, total_pending)
 
-        for post in posts:
+        for idx, post in enumerate(posts, start=1):
             try:
+                logger.info(f"Analyzing post {idx}/{len(posts)}")
                 self.process_post(post)
                 stats["processed"] += 1
             except Exception:
@@ -42,11 +57,15 @@ class AnalysisService:
                 )
                 self.db.rollback()
 
+        remaining = max(0, total_pending - stats["processed"])
+        stats["remaining"] = remaining
+        
         logger.info(
-            "Groq analysis batch completed: found=%s processed=%s failed=%s",
+            "Groq analysis batch completed: found=%s processed=%s failed=%s remaining=%s",
             stats["found"],
             stats["processed"],
             stats["failed"],
+            stats["remaining"],
         )
         return stats
 
@@ -67,7 +86,7 @@ class AnalysisService:
             summary=result.summary,
             is_gibberish=result.is_gibberish,
             is_duplicate=False,
-            analyzed_at=datetime.now(UTC),
+            analyzed_at=datetime.now(timezone.utc),
         )
 
         try:
@@ -88,11 +107,11 @@ class AnalysisService:
             raise
 
     def _fetch_unanalysed_posts(self, limit: int) -> list[Post]:
+        subquery = select(Analysis.post_id).subquery()
         statement = (
             select(Post)
-            .outerjoin(Analysis, Analysis.post_id == Post.id)
-            .where(Analysis.id.is_(None))
-            .order_by(Post.collected_at.asc())
+            .where(Post.id.not_in(subquery))
+            .order_by(Post.collected_at.desc())
             .limit(limit)
         )
         return list(self.db.scalars(statement).all())
