@@ -16,5 +16,5 @@ export const SENTIMENTS = ["positive", "neutral", "negative", "mixed"];
 
 export function humanize(value: string | null | undefined) {
   if (!value) return "Unknown";
-  return value.replaceAll("_", " ");
+  return value.replace(/_/g, " ");
 }

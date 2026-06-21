@@ -18,7 +18,7 @@ export default function BarList({ title, items }: BarListProps) {
           items.map((item) => (
             <div key={item.name}>
               <div className="flex items-center justify-between gap-3 text-sm">
-                <span className="truncate capitalize text-slate-700">{item.name.replaceAll("_", " ")}</span>
+                <span className="truncate capitalize text-slate-700">{item.name.replace(/_/g, " ")}</span>
                 <span className="font-medium">{item.count}</span>
               </div>
               <div className="mt-1 h-2 rounded-full bg-slate-100">

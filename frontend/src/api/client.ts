@@ -6,7 +6,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 20000,
+  timeout: 120000,
 });
 
 export type PostFilters = {
@@ -27,6 +27,18 @@ export type SearchFilters = {
   sentiment?: string;
   page?: number;
   page_size?: number;
+};
+
+export type PipelineStatus = {
+  [key: string]: string | number | boolean | undefined;
+  success: boolean;
+  error?: string;
+  found?: number;
+  processed?: number;
+  failed?: number;
+  eligible_posts?: number;
+  cluster_count?: number;
+  cluster_memberships?: number;
 };
 
 export const api = {
@@ -62,6 +74,26 @@ export const api = {
   },
   async search(params: SearchFilters) {
     const response = await apiClient.get<Paginated<Post>>("/search", { params });
+    return response.data;
+  },
+  async runIngest() {
+    const response = await apiClient.post<PipelineStatus>("/pipeline/ingest");
+    return response.data;
+  },
+  async runAnalyze() {
+    const response = await apiClient.post<PipelineStatus>("/pipeline/analyze");
+    return response.data;
+  },
+  async runEmbed() {
+    const response = await apiClient.post<PipelineStatus>("/pipeline/embed");
+    return response.data;
+  },
+  async runCluster() {
+    const response = await apiClient.post<PipelineStatus>("/pipeline/cluster");
+    return response.data;
+  },
+  async runAll() {
+    const response = await apiClient.post<PipelineStatus>("/pipeline/run-all");
     return response.data;
   },
 };

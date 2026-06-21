@@ -34,7 +34,7 @@ export default function PostTable({ posts }: PostTableProps) {
                 </td>
                 <td className="px-4 py-3 capitalize">{post.platform}</td>
                 <td className="px-4 py-3 capitalize">
-                  {(post.analysis?.category ?? post.category)?.replaceAll("_", " ") ?? "Pending"}
+                  {(post.analysis?.category ?? post.category)?.replace(/_/g, " ") ?? "Pending"}
                 </td>
                 <td className="px-4 py-3 capitalize">
                   {post.analysis?.sentiment ?? post.sentiment ?? "Pending"}
