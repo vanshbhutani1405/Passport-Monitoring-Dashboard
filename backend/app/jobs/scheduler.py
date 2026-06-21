@@ -79,16 +79,14 @@ class PipelineScheduler:
             return {"status": "failed", "error": str(exc)}
 
     def _run_google_news(self) -> dict[str, object]:
-        with SessionLocal() as db:
-            run = GoogleNewsIngestionService(db).ingest()
-            return {"run_id": str(run.id), "status": run.status, "posts_saved": run.posts_saved}
+        run = GoogleNewsIngestionService().ingest()
+        return {"run_id": str(run.id), "status": run.status, "posts_saved": run.posts_saved}
 
     def _run_youtube(self) -> dict[str, object]:
-        with SessionLocal() as db:
-            run = YouTubeIngestionService(db).ingest(
+        run = YouTubeIngestionService().ingest(
                 max_results_per_keyword=self.settings.youtube_max_results_per_keyword
             )
-            return {"run_id": str(run.id), "status": run.status, "posts_saved": run.posts_saved}
+        return {"run_id": str(run.id), "status": run.status, "posts_saved": run.posts_saved}
 
     def _run_analysis(self) -> dict[str, int]:
         with SessionLocal() as db:
