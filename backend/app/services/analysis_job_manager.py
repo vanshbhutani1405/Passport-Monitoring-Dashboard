@@ -1,6 +1,7 @@
 
 import logging
 import threading
+import time
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, Dict, Any
@@ -12,8 +13,7 @@ from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.models.analysis import Analysis
 from app.models.post import Post
-from app.nlp.groq_analyzer import GroqAnalyzer
-
+from app.nlp.groq_analyzer import GroqAnalyzer, GroqRateLimitError
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class AnalysisJobManager:
     _instance: Optional["AnalysisJobManager"] = None
     _lock: threading.Lock = threading.Lock()
-    
+
     def __new__(cls):
         if cls._instance is None:
             with cls._lock:
@@ -29,7 +29,7 @@ class AnalysisJobManager:
                     cls._instance = super().__new__(cls)
                     cls._instance._initialized = False
         return cls._instance
-    
+
     def __init__(self):
         if self._initialized:
             return
@@ -40,6 +40,7 @@ class AnalysisJobManager:
             "remaining": 0,
             "successful": 0,
             "failed": 0,
+            "rate_limited": 0,
             "started_at": None,
             "updated_at": None,
         }
@@ -48,8 +49,9 @@ class AnalysisJobManager:
         self.settings = get_settings()
         self._processed_post_ids: set[str] = set()
         self._failed_post_ids: set[str] = set()
+        self._rate_limited_post_ids: set[str] = set()
         self._initialized = True
-        
+
     def _get_pending_count(self, db: Session) -> int:
         stmt = (
             select(func.count(Post.id))
@@ -58,35 +60,35 @@ class AnalysisJobManager:
             .where(Analysis.id.is_(None))
         )
         return db.execute(stmt).scalar() or 0
-        
+
     def _fetch_batch(self, db: Session, batch_size: int) -> list[Post]:
-        # Fetch posts not already in processed or failed sets
         subquery = select(Analysis.post_id).subquery()
         stmt = (
             select(Post)
             .where(Post.id.not_in(subquery))
             .where(Post.id.not_in(self._processed_post_ids))
             .where(Post.id.not_in(self._failed_post_ids))
+            .where(Post.id.not_in(self._rate_limited_post_ids))
             .order_by(Post.collected_at.desc())
             .limit(batch_size)
         )
         return list(db.scalars(stmt).all())
-        
+
     def _process_single_post(self, post: Post) -> bool:
         db = SessionLocal()
+        is_rate_limited = False
         try:
-            # Check if analysis already exists before processing
             existing_analysis = db.scalar(
                 select(Analysis).where(Analysis.post_id == post.id)
             )
             if existing_analysis:
-                logger.info("Skipping already analysed post_id=%s", post.id)
+                logger.info(f"Skipping already analyzed post_id={post.id}")
                 return True
-                
+
             analyzer = GroqAnalyzer(self.settings)
             text = self._build_input_text(post)
             result = analyzer.analyze(text)
-            
+
             analysis = Analysis(
                 post_id=post.id,
                 language=result.language,
@@ -97,46 +99,45 @@ class AnalysisJobManager:
                 is_duplicate=False,
                 analyzed_at=datetime.now(timezone.utc),
             )
-            
+
             db.add(analysis)
             db.commit()
             logger.info(
-                "Stored Groq analysis post_id=%s category=%s sentiment=%s language=%s",
-                post.id,
-                analysis.category,
-                analysis.sentiment,
-                analysis.language,
+                f"Stored Groq analysis post_id={post.id} category={analysis.category} sentiment={analysis.sentiment} language={analysis.language}"
             )
+            time.sleep(2)  # Sleep for 2s after successful request
             return True
+        except GroqRateLimitError:
+            logger.warning(f"Post {post.id} was rate-limited, will retry later")
+            is_rate_limited = True
+            raise
         except Exception as e:
             logger.exception(
-                "Failed to analyse post_id=%s platform=%s platform_post_id=%s",
-                post.id,
-                post.platform,
-                post.platform_post_id,
+                f"Failed to analyze post_id={post.id} platform={post.platform} platform_post_id={post.platform_post_id}"
             )
             db.rollback()
-            return False
+            raise
         finally:
             db.close()
-            
+
     def _process_all(self):
         self.status["status"] = "running"
         self.status["started_at"] = datetime.now(timezone.utc).isoformat()
         self.status["processed"] = 0
         self.status["successful"] = 0
         self.status["failed"] = 0
+        self.status["rate_limited"] = 0
         self._processed_post_ids = set()
         self._failed_post_ids = set()
+        self._rate_limited_post_ids = set()
         self._stop_event.clear()
-        
-        batch_size = self.settings.analysis_batch_size
-        max_workers = 5
-        
+
+        batch_size = 20  # Set batch size to 20
+        max_workers = 1  # Set max workers to 1
+
         while not self._stop_event.is_set():
             db = SessionLocal()
             try:
-                # Recompute pending count from DB each batch
                 pending = self._get_pending_count(db)
                 self.status["total_posts"] = db.query(Post).count()
                 self.status["remaining"] = pending
@@ -148,7 +149,6 @@ class AnalysisJobManager:
                     self.status["updated_at"] = datetime.now(timezone.utc).isoformat()
                     break
 
-                # Fetch a new batch
                 batch = self._fetch_batch(db, batch_size)
                 if not batch:
                     logger.info("No more posts to analyze!")
@@ -157,19 +157,16 @@ class AnalysisJobManager:
                     break
 
                 logger.info(
-                    f"Batch fetched: {len(batch)}, "
-                    f"Processed: {self.status['processed']}, "
-                    f"Failed: {self.status['failed']}, "
-                    f"Pending: {pending}"
+                    f"Batch fetched: {len(batch)}, processed: {self.status['processed']}, "
+                    f"failed: {self.status['failed']}, rate_limited: {self.status['rate_limited']}, "
+                    f"pending: {pending}"
                 )
             finally:
                 db.close()
 
-            # Process the batch
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_post = {
-                    executor.submit(self._process_single_post, post): post
-                    for post in batch
+                    executor.submit(self._process_single_post, post): post for post in batch
                 }
 
                 for future in as_completed(future_to_post):
@@ -183,16 +180,19 @@ class AnalysisJobManager:
                         self.status["processed"] += 1
                         if success:
                             self.status["successful"] += 1
-                        else:
-                            self._failed_post_ids.add(post.id)
-                            self.status["failed"] += 1
 
                         self.status["updated_at"] = datetime.now(timezone.utc).isoformat()
                         logger.debug(
                             f"Progress: processed {self.status['processed']}, "
+                            f"successful {self.status['successful']}, "
                             f"failed {self.status['failed']}, "
-                            f"successful {self.status['successful']}"
+                            f"rate_limited {self.status['rate_limited']}"
                         )
+                    except GroqRateLimitError:
+                        self._rate_limited_post_ids.add(post.id)
+                        self.status["rate_limited"] += 1
+                        self.status["processed"] += 1
+                        self.status["updated_at"] = datetime.now(timezone.utc).isoformat()
                     except Exception as e:
                         logger.exception(f"Error processing post {post.id}")
                         self._processed_post_ids.add(post.id)
@@ -210,22 +210,22 @@ class AnalysisJobManager:
                 self.status["status"] = "completed"
             self.status["updated_at"] = datetime.now(timezone.utc).isoformat()
             logger.info(
-                f"Analysis job finished: "
-                f"status={self.status['status']}, "
+                f"Analysis job finished: status={self.status['status']}, "
                 f"total_processed={self.status['processed']}, "
                 f"successful={self.status['successful']}, "
                 f"failed={self.status['failed']}, "
+                f"rate_limited={self.status['rate_limited']}, "
                 f"remaining={final_pending}"
             )
         finally:
             db.close()
-        
+
     def start_analysis(self) -> bool:
         with self._lock:
             if self.status["status"] == "running":
                 logger.info("Analysis is already running!")
                 return False
-                
+
             self._running_thread = threading.Thread(
                 target=self._process_all,
                 daemon=True,
@@ -233,15 +233,15 @@ class AnalysisJobManager:
             self._running_thread.start()
             logger.info("Started analysis background job")
             return True
-            
+
     def get_status(self) -> Dict[str, Any]:
         return self.status.copy()
-        
+
     def stop_analysis(self):
         self._stop_event.set()
         if self._running_thread and self._running_thread.is_alive():
             self._running_thread.join(timeout=5)
-        
+
     @staticmethod
     def _build_input_text(post: Post) -> str:
         parts = [post.title or "", post.content or ""]

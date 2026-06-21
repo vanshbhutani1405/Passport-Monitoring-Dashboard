@@ -1,12 +1,13 @@
+
 import json
 import logging
 import re
+import time
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from app.core.config import Settings, get_settings
-
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,11 @@ class GroqAnalysisResult(BaseModel):
         return value.strip()
 
 
+class GroqRateLimitError(Exception):
+    """Exception raised when Groq API returns a 429 rate limit error"""
+    pass
+
+
 class GroqAnalyzer:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
@@ -98,35 +104,46 @@ class GroqAnalyzer:
             )
 
         client = self._get_client()
+        retry_delays = [30, 60, 120]  # 30s, 60s, 120s delays for retries
+        last_exception = None
 
-        try:
-            response = client.chat.completions.create(
-                model=self.settings.groq_model,
-                temperature=0,
-                response_format={"type": "json_object"},
-                messages=[
-                    {
-                        "role": "system",
-                        "content": self._system_prompt(),
-                    },
-                    {
-                        "role": "user",
-                        "content": content[:6000],
-                    },
-                ],
-            )
-            raw_content = response.choices[0].message.content
-            return self._parse_response(raw_content)
-        except Exception as exc:
-            if self._rate_limit_error_cls and isinstance(exc, self._rate_limit_error_cls):
-                logger.exception("Groq rate limit reached")
-                raise RuntimeError("Groq rate limit reached") from exc
-            if self._api_error_cls and isinstance(exc, self._api_error_cls):
-                logger.exception("Groq API request failed")
-                raise RuntimeError("Groq API request failed") from exc
+        for attempt, delay in enumerate(retry_delays, start=1):
+            try:
+                response = client.chat.completions.create(
+                    model=self.settings.groq_model,
+                    temperature=0,
+                    response_format={"type": "json_object"},
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": self._system_prompt(),
+                        },
+                        {
+                            "role": "user",
+                            "content": content[:6000],
+                        },
+                    ],
+                )
+                raw_content = response.choices[0].message.content
+                result = self._parse_response(raw_content)
+                return result
+            except Exception as exc:
+                last_exception = exc
+                if self._rate_limit_error_cls and isinstance(exc, self._rate_limit_error_cls):
+                    if attempt < len(retry_delays):
+                        logger.warning(f"Groq rate limit hit (attempt {attempt}/{len(retry_delays)}), waiting {delay}s before retrying")
+                        time.sleep(delay)
+                    else:
+                        logger.error(f"Groq rate limit hit after {len(retry_delays)} attempts, marking post as rate-limited")
+                        raise GroqRateLimitError(f"Rate limit exceeded after {len(retry_delays)} retries") from exc
+                else:
+                    if self._api_error_cls and isinstance(exc, self._api_error_cls):
+                        logger.error(f"Groq API request failed: {str(exc)}")
+                    else:
+                        logger.error(f"Groq analysis failed: {str(exc)}")
+                    raise
 
-            logger.exception("Groq analysis failed")
-            raise
+        raise last_exception
 
     @staticmethod
     def _system_prompt() -> str:
@@ -156,7 +173,7 @@ class GroqAnalyzer:
         try:
             return GroqAnalysisResult.model_validate(payload)
         except ValidationError as exc:
-            logger.warning("Groq response validation failed: payload=%s errors=%s", payload, exc.errors())
+            logger.warning(f"Groq response validation failed: payload={payload}, errors={exc.errors()}")
             raise ValueError("Groq returned an invalid analysis payload.") from exc
 
     @staticmethod
@@ -172,5 +189,6 @@ class GroqAnalyzer:
         try:
             return json.loads(object_match.group(0))
         except json.JSONDecodeError as exc:
-            logger.warning("Failed to parse Groq JSON response: %s", raw_content)
+            logger.warning(f"Failed to parse Groq JSON response: {raw_content}")
             raise ValueError("Groq response contained malformed JSON.") from exc
+

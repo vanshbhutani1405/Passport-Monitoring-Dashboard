@@ -1,3 +1,4 @@
+
 import { useState } from "react";
 
 import { api } from "../api/client";
@@ -6,6 +7,7 @@ import { useToastContext } from "../App";
 
 type PostTableProps = {
   posts: Post[];
+  onPostUpdated?: (postId: string) => void;
 };
 
 const SUPPORTED_LANGUAGES = [
@@ -26,13 +28,14 @@ type TranslationState = {
   full?: string;
 };
 
-export default function PostTable({ posts }: PostTableProps) {
+export default function PostTable({ posts, onPostUpdated }: PostTableProps) {
   const { showToast } = useToastContext();
   const [expandedPosts, setExpandedPosts] = useState<Set<string>>(new Set());
   const [selectedSummaryLanguages, setSelectedSummaryLanguages] = useState<Record<string, string>>({});
   const [selectedFullLanguages, setSelectedFullLanguages] = useState<Record<string, string>>({});
   const [isTranslatingSummary, setIsTranslatingSummary] = useState<Record<string, boolean>>({});
   const [isTranslatingFull, setIsTranslatingFull] = useState<Record<string, boolean>>({});
+  const [isAnalyzingPost, setIsAnalyzingPost] = useState<Record<string, boolean>>({});
   const [translations, setTranslations] = useState<Record<string, TranslationState>>({});
 
   const toggleExpanded = (postId: string) => {
@@ -43,6 +46,21 @@ export default function PostTable({ posts }: PostTableProps) {
       newExpanded.add(postId);
     }
     setExpandedPosts(newExpanded);
+  };
+
+  const handleAnalyzePost = async (postId: string) => {
+    setIsAnalyzingPost((prev) => ({ ...prev, [postId]: true }));
+    try {
+      await api.analyzePost(postId);
+      showToast("Post analyzed successfully!", "success");
+      if (onPostUpdated) {
+        onPostUpdated(postId);
+      }
+    } catch (e) {
+      showToast("Failed to analyze post", "error");
+    } finally {
+      setIsAnalyzingPost((prev) => ({ ...prev, [postId]: false }));
+    }
   };
 
   const handleTranslateSummary = async (postId: string) => {
@@ -109,7 +127,6 @@ export default function PostTable({ posts }: PostTableProps) {
           className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm"
         >
           <div className="p-5">
-            {/* Platform Badge */}
             <div className="mb-3 flex items-center gap-2">
               <span
                 className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${getPlatformColor(
@@ -123,7 +140,6 @@ export default function PostTable({ posts }: PostTableProps) {
               </span>
             </div>
 
-            {/* Title */}
             <h3 className="text-lg font-semibold text-slate-900 mb-3">
               <a
                 href={post.url || "#"}
@@ -135,71 +151,85 @@ export default function PostTable({ posts }: PostTableProps) {
               </a>
             </h3>
 
-            {/* AI Summary Section - Prominent */}
-            <div className="mb-4">
-              <div className="mb-2 flex items-center gap-2">
-                <span className="text-2xl">🧠</span>
-                <span className="text-sm font-semibold text-indigo-700">AI Summary</span>
-              </div>
-              <div className="rounded-lg border-2 border-indigo-100 bg-indigo-50 p-4">
-                <p className="text-sm text-slate-700">
-                  {translations[post.id]?.summary || post.analysis?.summary || "No summary available."}
-                </p>
+            {!post.analysis && (
+              <button
+                onClick={() => handleAnalyzePost(post.id)}
+                disabled={isAnalyzingPost[post.id]}
+                className="mb-4 rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:bg-slate-400"
+              >
+                {isAnalyzingPost[post.id] ? "Analyzing..." : "⚡ Generate AI Analysis"}
+              </button>
+            )}
 
-                {post.analysis?.summary && (
-                  <div className="mt-3 flex items-center gap-2">
-                    <select
-                      className="rounded border border-slate-300 bg-white px-2 py-1 text-xs"
-                      value={selectedSummaryLanguages[post.id] || "English"}
-                      onChange={(e) =>
-                        setSelectedSummaryLanguages((prev) => ({
-                          ...prev,
-                          [post.id]: e.target.value,
-                        }))
-                      }
-                    >
-                      {SUPPORTED_LANGUAGES.map((lang) => (
-                        <option key={lang} value={lang}>
-                          {lang}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      onClick={() => handleTranslateSummary(post.id)}
-                      disabled={isTranslatingSummary[post.id]}
-                      className="rounded bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700 disabled:bg-slate-400"
-                    >
-                      {isTranslatingSummary[post.id] ? "Translating..." : "Translate Summary"}
-                    </button>
-                  </div>
+            {post.analysis && (
+              <div className="mb-4">
+                <div className="mb-2 flex items-center gap-2">
+                  <span className="text-2xl">🧠</span>
+                  <span className="text-sm font-semibold text-indigo-700">AI Summary</span>
+                </div>
+                <div className="rounded-lg border-2 border-indigo-100 bg-indigo-50 p-4">
+                  <p className="text-sm text-slate-700">
+                    {translations[post.id]?.summary || post.analysis.summary || "No summary available."}
+                  </p>
+
+                  {post.analysis.summary && (
+                    <div className="mt-3 flex items-center gap-2">
+                      <select
+                        className="rounded border border-slate-300 bg-white px-2 py-1 text-xs"
+                        value={selectedSummaryLanguages[post.id] || "English"}
+                        onChange={(e) =>
+                          setSelectedSummaryLanguages((prev) => ({
+                            ...prev,
+                            [post.id]: e.target.value,
+                          }))
+                        }
+                      >
+                        {SUPPORTED_LANGUAGES.map((lang) => (
+                          <option key={lang} value={lang}>
+                            {lang}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => handleTranslateSummary(post.id)}
+                        disabled={isTranslatingSummary[post.id]}
+                        className="rounded bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700 disabled:bg-slate-400"
+                      >
+                        {isTranslatingSummary[post.id] ? "Translating..." : "Translate Summary"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {post.analysis && (
+              <div className="flex flex-wrap items-center gap-3 mb-4">
+                <span
+                  className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium text-indigo-700 bg-indigo-50 border-indigo-200`}
+                >
+                  {post.analysis.category ? post.analysis.category.replace("_", " ") : "Category: Pending"}
+                </span>
+                <span
+                  className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium ${getSentimentColor(
+                    post.analysis.sentiment
+                  )}`}
+                >
+                  {post.analysis.sentiment || "Sentiment: Pending"}
+                </span>
+                {post.analysis.language && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700 border border-slate-200">
+                    {post.analysis.language}
+                  </span>
+                )}
+                {post.analysis.is_gibberish && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-yellow-50 px-3 py-1 text-xs font-medium text-yellow-800 border border-yellow-200">
+                    🚨 Potential Spam/Gibberish
+                  </span>
                 )}
               </div>
-            </div>
+            )}
 
-            {/* Metadata Row */}
-            <div className="flex flex-wrap items-center gap-3 mb-4">
-              <span
-                className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium ${
-                  post.analysis?.category ? "text-indigo-700 bg-indigo-50 border-indigo-200" : "text-slate-600"
-                }`}
-              >
-                {post.analysis?.category ? post.analysis.category.replace("_", " ") : "Category: Pending"}
-              </span>
-              <span
-                className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium ${getSentimentColor(
-                  post.analysis?.sentiment
-                )}`}
-              >
-                {post.analysis?.sentiment || "Sentiment: Pending"}
-              </span>
-              {post.analysis?.language && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700 border border-slate-200">
-                  {post.analysis.language}
-                </span>
-              )}
-            </div>
-
-            {/* Expandable Section */}
             <button
               onClick={() => toggleExpanded(post.id)}
               className="flex items-center gap-1 text-sm text-slate-600 hover:text-indigo-600 mb-3"
@@ -257,3 +287,4 @@ export default function PostTable({ posts }: PostTableProps) {
     </div>
   );
 }
+

@@ -1,5 +1,6 @@
+
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -11,7 +12,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.database import get_db
 from app.models.analysis import Analysis
 from app.models.post import Post
-
+from app.nlp.groq_analyzer import GroqAnalyzer
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/posts", tags=["posts"])
@@ -87,7 +88,7 @@ def list_posts(
             end_date=end_date,
         )
 
-        total = db.scalar(select(func.count()).select_from(statement.subquery())) or 0
+        total = db.execute(select(func.count()).select_from(statement.subquery())).scalar() or 0
         posts = db.scalars(
             statement.order_by(Post.posted_at.desc().nullslast(), Post.collected_at.desc())
             .offset((page - 1) * page_size)
@@ -109,13 +110,64 @@ def get_post(post_id: UUID, db: Session = Depends(get_db)) -> Post:
             .options(selectinload(Post.analysis))
         )
     except SQLAlchemyError:
-        logger.exception("Failed to fetch post_id=%s", post_id)
+        logger.exception(f"Failed to fetch post_id={post_id}")
         raise HTTPException(status_code=500, detail="Failed to fetch post")
 
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
 
     return post
+
+
+@router.post("/{post_id}/analyze", response_model=AnalysisResponse)
+def analyze_post(post_id: UUID, db: Session = Depends(get_db)) -> Analysis:
+    try:
+        # Check if analysis already exists
+        existing_analysis = db.scalar(
+            select(Analysis).where(Analysis.post_id == post_id)
+        )
+        if existing_analysis:
+            logger.info(f"Returning existing analysis for post_id={post_id}")
+            return existing_analysis
+
+        # Get post
+        post = db.scalar(
+            select(Post).where(Post.id == post_id)
+        )
+        if not post:
+            raise HTTPException(status_code=404, detail="Post not found")
+
+        # Generate analysis
+        analyzer = GroqAnalyzer()
+        content = "\n\n".join([post.title or "", post.content or ""])
+        result = analyzer.analyze(content)
+
+        # Save analysis
+        analysis = Analysis(
+            post_id=post_id,
+            language=result.language,
+            category=result.category,
+            sentiment=result.sentiment,
+            summary=result.summary,
+            is_gibberish=result.is_gibberish,
+            is_duplicate=False,
+            analyzed_at=datetime.now(timezone.utc),
+        )
+        db.add(analysis)
+        db.commit()
+        db.refresh(analysis)
+        logger.info(f"Created new analysis for post_id={post_id}")
+        return analysis
+    except HTTPException:
+        raise
+    except SQLAlchemyError:
+        logger.exception(f"Failed to analyze post_id={post_id}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to analyze post")
+    except Exception as e:
+        logger.exception(f"Unexpected error analyzing post_id={post_id}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to analyze post")
 
 
 def _apply_post_filters(
@@ -140,3 +192,4 @@ def _apply_post_filters(
     if end_date:
         statement = statement.where(Post.posted_at <= end_date)
     return statement
+

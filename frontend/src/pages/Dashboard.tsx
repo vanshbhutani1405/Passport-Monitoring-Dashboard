@@ -1,3 +1,4 @@
+
 import { useEffect, useState, useRef } from "react";
 
 import { api, type PipelineStatus } from "../api/client";
@@ -51,7 +52,22 @@ export default function Dashboard() {
     } catch {
       // ignore errors when not important
     }
-  }
+  };
+
+  const handlePostUpdated = async (postId: string) => {
+    try {
+      const updatedPost = await api.getPost(postId);
+      setRecentPosts((prev) =>
+        prev.map((post) => (post.id === postId ? updatedPost : post))
+      );
+      // Also refresh analytics to reflect changes
+      const analyticsData = await api.getAnalytics();
+      setAnalytics(analyticsData);
+    } catch (e) {
+      // Fall back to full refresh if single post fetch fails
+      await loadDashboard();
+    }
+  };
 
   useEffect(() => {
     void loadDashboard();
@@ -417,8 +433,12 @@ export default function Dashboard() {
             {recentPosts.length} shown
           </span>
         </div>
-        <PostTable posts={recentPosts} />
+        <PostTable
+          posts={recentPosts}
+          onPostUpdated={handlePostUpdated}
+        />
       </section>
     </div>
   );
 }
+

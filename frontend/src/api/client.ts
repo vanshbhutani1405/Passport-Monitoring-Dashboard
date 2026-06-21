@@ -73,6 +73,10 @@ export const api = {
     const response = await apiClient.get<Post>(`/posts/${id}`);
     return response.data;
   },
+  async analyzePost(id: string) {
+    const response = await apiClient.post<Post["analysis"]>(`/posts/${id}/analyze`);
+    return response.data;
+  },
   async getClusters(params: { page?: number; page_size?: number } = {}) {
     const response = await apiClient.get<Paginated<Cluster>>("/clusters", { params });
     return response.data;
