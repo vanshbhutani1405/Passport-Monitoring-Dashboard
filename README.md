@@ -18,6 +18,12 @@ https://passport-monitoring-dashboard.onrender.com
 
 https://passport-monitoring-dashboard.onrender.com/docs
 
+## Research & Platform Exploration
+
+Detailed platform exploration and data collection research:
+
+- [Data Collection Research](DATA_COLLECTION_RESEARCH.md)
+
 ---
 
 ## System Architecture
