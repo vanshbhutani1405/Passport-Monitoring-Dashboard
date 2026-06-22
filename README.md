@@ -352,22 +352,6 @@ AI Processing Layer
 
 ---
 
-# Screenshots
-
-## Dashboard
-
-![Dashboard](docs/dashboard.png)
-
-## Analytics
-
-![Analytics](docs/analytics.png)
-
-## Clustering View
-
-![Clusters](docs/clusters.png)
-
----
-
 # Author
 
 Vansh
