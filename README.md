@@ -20,10 +20,11 @@ https://passport-monitoring-dashboard.onrender.com/docs
 
 ---
 
-# System Architecture
+## System Architecture
 
-![System Architecture](docs/architecture.png)
-
+<p align="center">
+  <img src="architecture.png" alt="Passport Monitoring Dashboard Architecture" width="100%">
+</p>
 ---
 
 # Overview
