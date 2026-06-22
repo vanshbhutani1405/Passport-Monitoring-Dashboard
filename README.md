@@ -1,183 +1,381 @@
-# Passport Social Media Monitoring & Intelligence Platform
+# Passport Monitoring Dashboard
 
-Backend-first MVP for monitoring passport-related discussions from Reddit and YouTube, processing them with Groq NLP, generating sentence-transformer embeddings, clustering similar discussions, and presenting insights through a React dashboard.
+An AI-powered Passport Monitoring Dashboard that aggregates passport-related discussions, announcements, user experiences, and updates from multiple public data sources, processes them using Natural Language Processing (NLP) and Large Language Models (LLMs), and presents actionable insights through an interactive analytics dashboard.
 
-## Architecture
+---
 
-```text
-Reddit + YouTube
-  -> FastAPI ingestion services
-  -> PostgreSQL posts
-  -> Groq analysis
-  -> SentenceTransformer embeddings
-  -> Semantic clustering
-  -> FastAPI APIs
-  -> React dashboard
-```
+## Live Demo
 
-## Backend Setup
+### Frontend
 
-```bash
-cd backend
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-```
+https://passport-monitoring-dashboard.vercel.app
 
-The API runs at:
+### Backend API
 
-```text
-http://localhost:8000/api/v1
-```
+https://passport-monitoring-dashboard.onrender.com
 
-## Frontend Setup
+### API Documentation
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
+https://passport-monitoring-dashboard.onrender.com/docs
 
-The frontend runs at:
+---
 
-```text
-http://localhost:5173
-```
+# System Architecture
 
-## Environment Variables
+![System Architecture](docs/architecture.png)
 
-Backend:
+---
 
-```env
-DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/passport_monitor
-CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+# Overview
 
-REDDIT_CLIENT_ID=
-REDDIT_CLIENT_SECRET=
-REDDIT_USER_AGENT=passport-monitor:v1.0
+The Passport Monitoring Dashboard is designed to monitor, organize, analyze, and visualize passport-related information collected from multiple online sources.
 
-YOUTUBE_API_KEY=
-GROQ_API_KEY=
-GROQ_MODEL=llama-3.3-70b-versatile
+The system automatically:
 
-SCHEDULER_ENABLED=false
-PIPELINE_INTERVAL_MINUTES=180
-REDDIT_LIMIT_PER_KEYWORD=20
-YOUTUBE_MAX_RESULTS_PER_KEYWORD=20
-ANALYSIS_BATCH_SIZE=50
-EMBEDDING_BATCH_SIZE=100
-```
+* Collects passport-related content
+* Filters irrelevant or low-quality content
+* Generates AI-powered summaries
+* Detects sentiment
+* Classifies content into categories
+* Identifies duplicates
+* Creates semantic clusters
+* Enables translation
+* Provides analytics and search capabilities
 
-Frontend:
+The goal is to help users quickly understand emerging passport-related trends and discussions without manually reviewing hundreds of individual posts.
 
-```env
-VITE_API_BASE_URL=http://localhost:8000/api/v1
-```
+---
 
-## API Endpoints
+# Key Features
 
-```text
-GET /api/v1/health
-GET /api/v1/posts
-GET /api/v1/posts/{id}
-GET /api/v1/clusters
-GET /api/v1/clusters/{id}
-GET /api/v1/clusters/{id}/posts
-GET /api/v1/analytics
-GET /api/v1/search
-```
+## Data Ingestion
 
-## Scheduler
+The platform continuously collects passport-related content from external public data sources.
 
-The scheduler runs this pipeline:
+Capabilities:
 
-```text
-Reddit ingestion
--> YouTube ingestion
--> Groq analysis
--> Embeddings
--> Clustering
-```
+* Automated data collection
+* Scheduled ingestion
+* Duplicate prevention
+* Metadata extraction
+* Structured storage
 
-Enable it with:
+---
 
-```env
-SCHEDULER_ENABLED=true
-```
+## AI-Powered Analysis
 
-Each stage is isolated. If one stage fails, the scheduler logs the error and continues to the next stage.
+Each post is processed using Large Language Models.
 
-## Neon PostgreSQL
+Generated insights include:
 
-1. Create a Neon project.
-2. Create a database named `passport_monitor`.
-3. Enable the `vector` extension from the SQL editor:
+### AI Summary
 
-```sql
-CREATE EXTENSION IF NOT EXISTS vector;
-```
+Generates concise summaries for each post.
 
-4. Copy the pooled PostgreSQL connection string.
-5. Use the SQLAlchemy psycopg format:
+Example:
 
-```text
-postgresql+psycopg://USER:PASSWORD@HOST/passport_monitor?sslmode=require
-```
+Original Content:
+Long passport-related discussion
 
-## Render Deployment
+Generated Summary:
+"User reports delay in passport renewal processing and seeks guidance."
 
-Use the included `render.yaml`.
+---
 
-Production startup command:
+### Sentiment Analysis
 
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port $PORT
-```
+Determines emotional tone:
 
-Set these Render environment variables:
+* Positive
+* Neutral
+* Negative
 
-```text
-DATABASE_URL
-REDDIT_CLIENT_ID
-REDDIT_CLIENT_SECRET
-REDDIT_USER_AGENT
-YOUTUBE_API_KEY
-GROQ_API_KEY
-CORS_ORIGINS
-SCHEDULER_ENABLED=true
-```
+---
 
-## Vercel Deployment
+### Category Classification
 
-Deploy the `frontend` directory to Vercel.
+Automatically categorizes posts into:
 
-Set:
+* Passport Application
+* Passport Renewal
+* Tatkal Services
+* Appointments
+* Travel Issues
+* Government Announcements
+* Visa Related
+* Fraud / Scam Reports
+* News
+* Personal Experiences
 
-```text
-VITE_API_BASE_URL=https://your-render-api.onrender.com/api/v1
-```
+---
 
-The included `frontend/vercel.json` handles SPA routing.
+### Language Detection
 
-## MVP Scope
+Automatically identifies the language of content.
 
-Implemented:
+---
 
-- PostgreSQL + SQLAlchemy models
-- Reddit ingestion
-- YouTube ingestion
-- Groq NLP analysis
-- SentenceTransformer embeddings
-- Semantic clustering
-- FastAPI APIs
-- React dashboard, clusters, and search pages
-- APScheduler orchestration
-- Render/Vercel deployment config
+### Gibberish Detection
 
-Not included:
+Removes:
 
-- Authentication
-- Multi-tenant support
-- Scrapling-based platforms
-- Enterprise audit or billing features
+* Spam
+* Bot-generated content
+* Low-quality posts
+* Meaningless text
+
+---
+
+# Semantic Search & Clustering
+
+The platform uses semantic embeddings and clustering algorithms to group similar discussions.
+
+Benefits:
+
+* Duplicate reduction
+* Topic discovery
+* Trend identification
+* Better dashboard readability
+
+Workflow:
+
+1. Generate embeddings
+2. Calculate semantic similarity
+3. Cluster related posts
+4. Create grouped discussion threads
+
+---
+
+# Translation Engine
+
+Supports multilingual accessibility.
+
+Users can translate analyzed content into multiple languages directly from the dashboard.
+
+Supported Languages:
+
+* English
+* Hindi
+* Punjabi
+* Spanish
+* French
+* German
+* Arabic
+* Chinese
+* Russian
+* Japanese
+
+---
+
+# Analytics Dashboard
+
+Provides real-time insights:
+
+### Content Analytics
+
+* Total Posts
+* Posts by Category
+* Posts by Platform
+* Posts by Language
+* Posts by Sentiment
+
+### Trend Analytics
+
+* Emerging Topics
+* Cluster Statistics
+* Duplicate Detection Metrics
+
+---
+
+# Search & Filtering
+
+Users can filter content by:
+
+* Category
+* Sentiment
+* Language
+* Source
+* Date
+* Engagement Metrics
+
+Features:
+
+* Full-text search
+* Semantic search
+* Advanced filtering
+
+---
+
+# Export Functionality
+
+Supports exporting filtered results.
+
+Available Formats:
+
+* CSV
+* Structured datasets for further analysis
+
+---
+
+# Technology Stack
+
+## Frontend
+
+* React
+* TypeScript
+* Vite
+* Axios
+
+## Backend
+
+* FastAPI
+* SQLAlchemy
+* Pydantic
+
+## Database
+
+* PostgreSQL
+* pgvector
+
+## AI / NLP
+
+* Groq LLM
+* Sentence Transformers
+* HDBSCAN
+* Scikit-Learn
+
+## Infrastructure
+
+* Render
+* Vercel
+
+---
+
+# System Workflow
+
+1. Data Collection
+2. Data Storage
+3. AI Analysis
+4. Embedding Generation
+5. Semantic Clustering
+6. Dashboard Visualization
+7. Search & Filtering
+8. Export
+
+---
+
+# API Endpoints
+
+## Health Check
+
+GET
+
+/api/v1/health
+
+---
+
+## Posts
+
+GET
+
+/api/v1/posts
+
+---
+
+## Analytics
+
+GET
+
+/api/v1/analytics
+
+---
+
+## Clusters
+
+GET
+
+/api/v1/clusters
+
+---
+
+## Translation
+
+POST
+
+/api/v1/translate
+
+---
+
+## Analysis Pipeline
+
+POST
+
+/api/v1/pipeline/analyze
+
+GET
+
+/api/v1/pipeline/analyze/status
+
+---
+
+# Deployment Architecture
+
+Frontend
+
+Vercel
+
+↓
+
+Backend
+
+Render
+
+↓
+
+PostgreSQL Database
+
+↓
+
+AI Processing Layer
+
+---
+
+# Future Enhancements
+
+* Real-time streaming ingestion
+* Enhanced trend forecasting
+* PDF exports
+* Geographical heatmaps
+* User alerts and notifications
+* Advanced topic modeling
+* Dashboard personalization
+
+---
+
+# Screenshots
+
+## Dashboard
+
+![Dashboard](docs/dashboard.png)
+
+## Analytics
+
+![Analytics](docs/analytics.png)
+
+## Clustering View
+
+![Clusters](docs/clusters.png)
+
+---
+
+# Author
+
+Vansh
+
+AI/ML Engineer | Generative AI Enthusiast
+
+Portfolio: https://vanshbhutani.me
+
+GitHub: https://github.com/vanshbhutani1405
+
+LinkedIn: https://linkedin.com/in/vansh-62b84a184
